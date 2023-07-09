@@ -106,8 +106,8 @@ contract DSCEngine is ReentrancyGuard {
     function redeemCollateralForDSC(address collateralTokenAddress, uint256 collateralAmount, uint256 dscBurnAmount)
         external
     {
-        burnDsc(dscBurnAmount);
-        redeemCollateral(collateralTokenAddress, collateralAmount);
+        _burnDsc(msg.sender, msg.sender, dscBurnAmount);
+        _redeemCollateral(msg.sender, msg.sender, collateralTokenAddress, collateralAmount);
     }
 
     /**
@@ -140,7 +140,56 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    function getHealthFactor() external {}
+    /**
+     * @param amount The amount of DSC to burn
+     * @notice This function allows a user to burn DSC
+     */
+    function burnDsc(uint256 amount) external moreThanZero(amount) {
+        _burnDsc(msg.sender, msg.sender, amount);
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    /**
+     * @param collateralTokenAddress address of the collateral token
+     * @param collateralAmount amount of collateral to redeem
+     * @notice This function allows a user to redeem collateral from the system
+     */
+    function redeemCollateral(address collateralTokenAddress, uint256 collateralAmount)
+        external
+        moreThanZero(collateralAmount)
+        nonReentrant
+    {
+        _redeemCollateral(msg.sender, msg.sender, collateralTokenAddress, collateralAmount);
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    function getPrecison() external pure returns (uint256) {
+        return PRECISION;
+    }
+
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_PRECISION;
+    }
+
+    function getLiquidationThreshold() external pure returns (uint256) {
+        return LIQUIDATION_THRESHOLD;
+    }
+
+    function getLiquidationBonus() external pure returns (uint256) {
+        return LIQUIDATION_BONUS;
+    }
+
+    function getMinHealthFactor() external pure returns (uint256) {
+        return MIN_HEALTH_FACTOR;
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return _collateralTokens;
+    }
+
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
 
     function getAccountDetails(address user)
         external
@@ -150,27 +199,23 @@ contract DSCEngine is ReentrancyGuard {
         (totalDscMinted, collateralValueInUsd) = _getAccountDetails(user);
     }
 
-    /**
-     * @param collateralTokenAddress address of the collateral token
-     * @param collateralAmount amount of collateral to redeem
-     * @notice This function allows a user to redeem collateral from the system
-     */
-    function redeemCollateral(address collateralTokenAddress, uint256 collateralAmount)
-        public
-        moreThanZero(collateralAmount)
-        nonReentrant
-    {
-        _redeemCollateral(msg.sender, msg.sender, collateralTokenAddress, collateralAmount);
-        _revertIfHealthFactorIsBroken(msg.sender);
+    function getUsdValue(
+        address token,
+        uint256 amount // in WEI
+    ) external view returns (uint256) {
+        return _getUsdValue(token, amount);
     }
 
-    /**
-     * @param amount The amount of DSC to burn
-     * @notice This function allows a user to burn DSC
-     */
-    function burnDsc(uint256 amount) public moreThanZero(amount) {
-        _burnDsc(msg.sender, msg.sender, amount);
-        _revertIfHealthFactorIsBroken(msg.sender);
+    function getCollateralBalanceOfUser(address user, address token) external view returns (uint256) {
+        return _collateralDeposited[user][token];
+    }
+
+    function getDsc() external view returns (address) {
+        return address(_dsc);
+    }
+
+    function getCollateralTokenPriceFeed(address token) external view returns (address) {
+        return _priceFeeds[token];
     }
 
     /**
@@ -216,20 +261,9 @@ contract DSCEngine is ReentrancyGuard {
         for (uint256 i = 0; i < _collateralTokens.length; i++) {
             address token = _collateralTokens[i];
             uint256 amount = _collateralDeposited[user][token];
-            totalCollateralValueInUsd += getUsdValue(token, amount);
+            totalCollateralValueInUsd += _getUsdValue(token, amount);
         }
         // return totalCollateralValueInUsd;
-    }
-
-    /**
-     * @param token The address of the token to get the USD value of
-     * @param amount The amount of the token to get the USD value of
-     * @notice This function returns the USD value of a token
-     */
-    function getUsdValue(address token, uint256 amount) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(_priceFeeds[token]);
-        (, int256 price,,,) = priceFeed.latestRoundData();
-        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION; // The price value returned will have 8 decimal precison, hence we multiply it by 1^10 so that both price and amount are uint256 and both have 1^18 decimal value
     }
 
     /**
@@ -241,43 +275,6 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(_priceFeeds[token]);
         (, int256 price,,,) = priceFeed.latestRoundData();
         return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION);
-    }
-
-    /**
-     * @param user address of the user calling this function
-     * @notice This function reverts if the health factor of a user is broken
-     */
-    function _revertIfHealthFactorIsBroken(address user) internal view {
-        // 1. Check health factor (If they have enough collateral)
-        // 2. If not, revert
-        uint256 userHealthFactor = _healthFactor(user);
-        if (userHealthFactor < MIN_HEALTH_FACTOR) {
-            revert DSCEngine__HealthFactorBroken(userHealthFactor);
-        }
-    }
-
-    /**
-     * @param user address of the user calling this function
-     * @notice This function calculates and returns the health factor of a user
-     */
-    function _healthFactor(address user) internal view returns (uint256) {
-        // 1. Get the value of all collateral
-        // 2. Get the value of all DSC
-        // 3. Return the ratio
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountDetails(user);
-        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
-    }
-
-    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
-        internal
-        pure
-        returns (uint256)
-    {
-        if (totalDscMinted == 0) {
-            return type(uint256).max;
-        }
-        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISON;
-        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
     }
 
     function _redeemCollateral(address from, address to, address collateralTokenAddress, uint256 collateralAmount)
@@ -306,6 +303,54 @@ contract DSCEngine is ReentrancyGuard {
             revert DSCEngine__TransferFailed();
         }
         _dsc.burn(dscAmountToBurn);
+    }
+
+    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        private
+        pure
+        returns (uint256)
+    {
+        if (totalDscMinted == 0) {
+            return type(uint256).max;
+        }
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISON;
+        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
+    }
+
+    /**
+     * @param user address of the user calling this function
+     * @notice This function reverts if the health factor of a user is broken
+     */
+    function _revertIfHealthFactorIsBroken(address user) private view {
+        // 1. Check health factor (If they have enough collateral)
+        // 2. If not, revert
+        uint256 userHealthFactor = _healthFactor(user);
+        if (userHealthFactor < MIN_HEALTH_FACTOR) {
+            revert DSCEngine__HealthFactorBroken(userHealthFactor);
+        }
+    }
+
+    /**
+     * @param token The address of the token to get the USD value of
+     * @param amount The amount of the token to get the USD value of
+     * @notice This function returns the USD value of a token
+     */
+    function _getUsdValue(address token, uint256 amount) private view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION; // The price value returned will have 8 decimal precison, hence we multiply it by 1^10 so that both price and amount are uint256 and both have 1^18 decimal value
+    }
+
+    /**
+     * @param user address of the user calling this function
+     * @notice This function calculates and returns the health factor of a user
+     */
+    function _healthFactor(address user) private view returns (uint256) {
+        // 1. Get the value of all collateral
+        // 2. Get the value of all DSC
+        // 3. Return the ratio
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountDetails(user);
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
     }
 
     /**
