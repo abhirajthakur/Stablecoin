@@ -70,6 +70,13 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
+    /**
+     * @param tokenAddresses The array of token addresses
+     * @param priceFeedAddresses The array of price feed addresses
+     * @param dscAddress The address of the Decentralized Stablecoin
+     * @notice This constructor initializes the contract
+     * @notice The tokenAddresses and priceFeedAddresses arrays must be the same length
+     */
     constructor(address[] memory tokenAddresses, address[] memory priceFeedAddresses, address dscAddress) {
         if (tokenAddresses.length != priceFeedAddresses.length) {
             revert DSCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
@@ -163,34 +170,69 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
+    /**
+     * @return PRECISION The precision of the price feed
+     * @notice This function returns the precision of the price feed
+     */
     function getPrecison() external pure returns (uint256) {
         return PRECISION;
     }
 
+    /**
+     * @return ADDITIONAL_FEED_PRECISION The additional precision of the price feed
+     * @notice This function returns the additional precision of the price feed
+     */
     function getAdditionalFeedPrecision() external pure returns (uint256) {
         return ADDITIONAL_FEED_PRECISION;
     }
 
+    /**
+     * @return LIQUIDATION_THRESHOLD The liquidation threshold
+     * @notice This function returns the liquidation threshold
+     */
     function getLiquidationThreshold() external pure returns (uint256) {
         return LIQUIDATION_THRESHOLD;
     }
 
+    /**
+     * @return LIQUIDATION_BONUS The liquidation bonus
+     * @notice This function returns the liquidation bonus
+     */
     function getLiquidationBonus() external pure returns (uint256) {
         return LIQUIDATION_BONUS;
     }
 
+    /**
+     * @return MIN_HEALTH_FACTOR The minimum health factor allowed
+     * @notice This function returns the minimum health factor allowed
+     */
     function getMinHealthFactor() external pure returns (uint256) {
         return MIN_HEALTH_FACTOR;
     }
 
+    /**
+     * @return collateralTokens The array of collateral tokens
+     * @notice This function returns the array of collateral tokens
+     */
     function getCollateralTokens() external view returns (address[] memory) {
         return _collateralTokens;
     }
 
+    /**
+     * @param user The address of the user to get the health factor of
+     * @return healthFactor The health factor of the user
+     * @notice This function returns the health factor of a user
+     */
     function getHealthFactor(address user) external view returns (uint256) {
         return _healthFactor(user);
     }
 
+    /**
+     * @param user The address of the user to get the details of
+     * @return totalDscMinted The amount of DSC minted by the user
+     * @return collateralValueInUsd The collateral value of the user in USD
+     * @notice This function returns the details of a user
+     */
     function getAccountDetails(address user)
         external
         view
@@ -199,6 +241,12 @@ contract DSCEngine is ReentrancyGuard {
         (totalDscMinted, collateralValueInUsd) = _getAccountDetails(user);
     }
 
+    /**
+     * @param token The address of the token to get the USD value of
+     * @param amount The amount of the token to get the USD value of
+     * @return usdValue The USD value of the token
+     * @notice This function returns the USD value of a token
+     */
     function getUsdValue(
         address token,
         uint256 amount // in WEI
@@ -206,14 +254,28 @@ contract DSCEngine is ReentrancyGuard {
         return _getUsdValue(token, amount);
     }
 
+    /**
+     * @param user The address of the user to get the DSC minted of
+     * @return dscMinted The amount of DSC minted by the user
+     * @notice This function returns the amount of DSC minted by a user
+     */
     function getCollateralBalanceOfUser(address user, address token) external view returns (uint256) {
         return _collateralDeposited[user][token];
     }
 
+    /**
+     * @return dsc The address of the Decentralized Stablecoin
+     * @notice This function returns the address of the Decentralized Stablecoin
+    */
     function getDsc() external view returns (address) {
         return address(_dsc);
     }
 
+    /**
+     * @param token The address of the token to get the price feed of
+     * @return priceFeed The address of the price feed of the token
+     * @notice This function returns the price feed of a token
+     */
     function getCollateralTokenPriceFeed(address token) external view returns (address) {
         return _priceFeeds[token];
     }
@@ -277,6 +339,13 @@ contract DSCEngine is ReentrancyGuard {
         return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION);
     }
 
+    /**
+     * @param from address of the user from whom to redeem collateral
+     * @param to address of the user to whom to send the collateral
+     * @param collateralTokenAddress address of the collateral token
+     * @param collateralAmount amount of collateral to redeem
+     * @notice This function redeems collateral from the system
+     */
     function _redeemCollateral(address from, address to, address collateralTokenAddress, uint256 collateralAmount)
         private
     {
@@ -305,6 +374,11 @@ contract DSCEngine is ReentrancyGuard {
         _dsc.burn(dscAmountToBurn);
     }
 
+    /**
+     * @param totalDscMinted amount of DSC minted by the user
+     * @param collateralValueInUsd collateral of the user in USD
+     * @notice This function calculates and returns the health factor of a user
+     */
     function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
         private
         pure
